@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import aiohttp
 
 from nio import (
     AsyncClient,
@@ -50,14 +51,11 @@ import sys
 import traceback
 
 import markdown2
-import feedparser
 
 from .logging import Logger
-from .callbacks import RESPONSE_CALLBACKS, EVENT_CALLBACKS
-from .commands import COMMANDS
 
 
-class RSSBot:
+class ReportBot:
     # Default values
     matrix_client: Optional[AsyncClient] = None
     sync_token: Optional[str] = None
@@ -75,7 +73,7 @@ class RSSBot:
 
     @property
     def loop_duration(self) -> int:
-        return self.config["RSSBot"].getint("LoopDuration", 300)
+        return self.config["ReportBot"].getint("LoopDuration", 300)
 
     @property
     def allowed_users(self) -> List[str]:
@@ -85,18 +83,27 @@ class RSSBot:
             List[str]: List of user IDs. Defaults to [], which means all users are allowed.
         """
         try:
-            return json.loads(self.config["RSSBot"]["AllowedUsers"])
+            return json.loads(self.config["ReportBot"]["AllowedUsers"])
         except:
             return []
+
+    @property
+    def room_id(self) -> str:
+        """Room ID to send reports to.
+
+        Returns:
+            str: The room ID to send reports to.
+        """
+        return self.config["Matrix"]["RoomID"]
 
     @property
     def display_name(self) -> str:
         """Display name of the bot user.
 
         Returns:
-            str: The display name of the bot user. Defaults to "RSSBot".
+            str: The display name of the bot user. Defaults to "ReportBot".
         """
-        return self.config["RSSBot"].get("DisplayName", "RSSBot")
+        return self.config["ReportBot"].get("DisplayName", "ReportBot")
 
     @property
     def default_room_name(self) -> str:
@@ -105,7 +112,7 @@ class RSSBot:
         Returns:
             str: The default name of rooms created by the bot. Defaults to the display name of the bot.
         """
-        return self.config["RSSBot"].get("DefaultRoomName", self.display_name)
+        return self.config["ReportBot"].get("DefaultRoomName", self.display_name)
 
     @property
     def debug(self) -> bool:
@@ -114,32 +121,30 @@ class RSSBot:
         Returns:
             bool: Whether to enable debug logging. Defaults to False.
         """
-        return self.config["RSSBot"].getboolean("Debug", False)
+        return self.config["ReportBot"].getboolean("Debug", False)
 
     # User agent to use for HTTP requests
-    USER_AGENT = (
-        "matrix-rssbot/dev (+https://git.private.coffee/PrivateCoffee/matrix-rssbot)"
-    )
+    USER_AGENT = "matrix-reportbot/dev (+https://git.private.coffee/PrivateCoffee/matrix-reportbot)"
 
     @classmethod
     def from_config(cls, config: ConfigParser):
-        """Create a new RSSBot instance from a config file.
+        """Create a new ReportBot instance from a config file.
 
         Args:
             config (ConfigParser): ConfigParser instance with the bot's config.
 
         Returns:
-            RSSBot: The new RSSBot instance.
+            ReportBot: The new ReportBot instance.
         """
 
-        # Create a new RSSBot instance
+        # Create a new ReportBot instance
         bot = cls()
         bot.config = config
 
         # Override default values
-        if "RSSBot" in config:
-            if "LogLevel" in config["RSSBot"]:
-                bot.logger = Logger(config["RSSBot"]["LogLevel"])
+        if "ReportBot" in config:
+            if "LogLevel" in config["ReportBot"]:
+                bot.logger = Logger(config["ReportBot"]["LogLevel"])
 
         # Set up the Matrix client
 
@@ -151,7 +156,7 @@ class RSSBot:
         bot.matrix_client.user_id = config["Matrix"].get("UserID")
         bot.matrix_client.device_id = config["Matrix"].get("DeviceID")
 
-        # Return the new RSSBot instance
+        # Return the new ReportBot instance
         return bot
 
     async def _get_user_id(self) -> str:
@@ -199,135 +204,6 @@ class RSSBot:
                 device_id = devices.devices[0].id
 
         return device_id
-
-    async def process_command(self, room: MatrixRoom, event: RoomMessageText):
-        """Process a command. Called from the event_callback() method.
-        Delegates to the appropriate command handler.
-
-        Args:
-            room (MatrixRoom): The room the command was sent in.
-            event (RoomMessageText): The event containing the command.
-        """
-
-        self.logger.log(
-            f"Received command {event.body} from {event.sender} in room {room.room_id}",
-            "debug",
-        )
-
-        if event.body.startswith("* "):
-            event.body = event.body[2:]
-
-        command = event.body.split()[1] if event.body.split()[1:] else None
-
-        await COMMANDS.get(command, COMMANDS[None])(room, event, self)
-
-    async def _event_callback(self, room: MatrixRoom, event: Event):
-        self.logger.log("Received event: " + str(event.event_id), "debug")
-        try:
-            for eventtype, callback in EVENT_CALLBACKS.items():
-                if isinstance(event, eventtype):
-                    await callback(room, event, self)
-        except Exception as e:
-            self.logger.log(
-                f"Error in event callback for {event.__class__}: {e}", "error"
-            )
-
-            if self.debug:
-                await self.send_message(
-                    room, f"Error: {e}\n\n```\n{traceback.format_exc()}\n```", True
-                )
-
-    def user_is_allowed(self, user_id: str) -> bool:
-        """Check if a user is allowed to use the bot.
-
-        Args:
-            user_id (str): The user ID to check.
-
-        Returns:
-            bool: Whether the user is allowed to use the bot.
-        """
-
-        return (
-            (
-                user_id in self.allowed_users
-                or f"*:{user_id.split(':')[1]}" in self.allowed_users
-                or f"@*:{user_id.split(':')[1]}" in self.allowed_users
-            )
-            if self.allowed_users
-            else True
-        )
-
-    async def event_callback(self, room: MatrixRoom, event: Event):
-        """Callback for events.
-
-        Args:
-            room (MatrixRoom): The room the event was sent in.
-            event (Event): The event.
-        """
-
-        if event.sender == self.matrix_client.user_id:
-            return
-
-        if not self.user_is_allowed(event.sender):
-            if len(room.users) == 2:
-                await self.matrix_client.room_send(
-                    room.room_id,
-                    "m.room.message",
-                    {
-                        "msgtype": "m.notice",
-                        "body": f"You are not allowed to use this bot. Please contact {self.operator} for more information.",
-                    },
-                )
-            return
-
-        task = asyncio.create_task(self._event_callback(room, event))
-
-    async def _response_callback(self, response: Response):
-        for response_type, callback in RESPONSE_CALLBACKS.items():
-            if isinstance(response, response_type):
-                await callback(response, self)
-
-    async def response_callback(self, response: Response):
-        task = asyncio.create_task(self._response_callback(response))
-
-    async def accept_pending_invites(self):
-        """Accept all pending invites."""
-
-        assert self.matrix_client, "Matrix client not set up"
-
-        invites = self.matrix_client.invited_rooms
-
-        for invite in [k for k in invites.keys()]:
-            if invite in self.room_ignore_list:
-                self.logger.log(
-                    f"Ignoring invite to room {invite} (room is in ignore list)",
-                    "debug",
-                )
-                continue
-
-            self.logger.log(f"Accepting invite to room {invite}")
-
-            response = await self.matrix_client.join(invite)
-
-            if isinstance(response, JoinError):
-                self.logger.log(
-                    f"Error joining room {invite}: {response.message}. Not trying again.",
-                    "error",
-                )
-
-                leave_response = await self.matrix_client.room_leave(invite)
-
-                if isinstance(leave_response, RoomLeaveError):
-                    self.logger.log(
-                        f"Error leaving room {invite}: {leave_response.message}",
-                        "error",
-                    )
-                    self.room_ignore_list.append(invite)
-
-            else:
-                await self.send_message(
-                    invite, "Thank you for inviting me to your room!"
-                )
 
     async def upload_file(
         self,
@@ -461,7 +337,7 @@ class RSSBot:
 
         msgtype = msgtype if msgtype else "m.notice" if notice else "m.text"
 
-        if not msgtype.startswith("rssbot."):
+        if not msgtype.startswith("reportbot."):
             msgcontent = {
                 "msgtype": msgtype,
                 "body": message,
@@ -528,82 +404,127 @@ class RSSBot:
                 if state_key is None or event["state_key"] == state_key:
                     return event
 
-    async def process_room(self, room):
-        self.logger.log(f"Processing room {room}", "debug")
-
-        state = await self.get_state_event(room, "rssbot.feeds")
-
-        if not state:
-            feeds = []
-        else:
-            feeds = state["content"]["feeds"]
-
-        for feed in feeds:
-            self.logger.log(f"Processing {feed} in {room}", "debug")
-
-            feed_state = await self.get_state_event(room, "rssbot.feed_state", feed)
-
-            if feed_state:
-                self.logger.log(
-                    f"Identified feed timestamp as {feed_state['content']['timestamp']}",
-                    "debug",
-                )
-                timestamp = int(feed_state["content"]["timestamp"])
-            else:
-                timestamp = 0
-
-            try:
-                feed_content = feedparser.parse(feed)
-                new_timestamp = timestamp
-                for entry in feed_content.entries:
-                    try:
-                        entry_time_info = entry.published_parsed
-                    except:
-                        entry_time_info = entry.updated_parsed
-
-                    entry_timestamp = int(datetime(*entry_time_info[:6]).timestamp())
-
-                    self.logger.log(f"Entry timestamp identified as {entry_timestamp}")
-
-                    if entry_timestamp > timestamp:
-                        entry_message = f"__{feed_content.feed.title}: {entry.title}__\n\n{entry.description}\n\n{entry.link}"
-                        await self.send_message(room, entry_message)
-                        new_timestamp = max(entry_timestamp, new_timestamp)
-
-                await self.send_state_event(
-                    room, "rssbot.feed_state", {"timestamp": new_timestamp}, feed
-                )
-            except Exception as e:
-                self.logger.log(f"Error processing feed at {feed}: {e}")
-                await self.send_message(
-                    room,
-                    f"Could not access or parse RSS feed at {feed}. Please ensure that you got the URL right, and that it is actually an RSS feed.",
-                    True,
-                )
-
-    async def process_rooms(self):
-        while True:
-            self.logger.log("Starting to process rooms", "debug")
-
-            start_timestamp = datetime.now()
-
-            for room in self.matrix_client.rooms.values():
+    async def get_new_reports(self, last_report_id):
+        # Call the Synapse admin API to get event reports since the last known one
+        endpoint = f"/_synapse/admin/v1/event_reports?from={last_report_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.matrix_client.homeserver}{endpoint}",
+                headers={"Authorization": f"Bearer {self.matrix_client.access_token}"},
+            ) as response:
                 try:
-                    await self.process_room(room)
+                    response_json = await response.json()
+                    return (
+                        response_json.get("event_reports", []) if response_json else []
+                    )
+                except json.JSONDecodeError:
+                    self.logger.log("Failed to decode JSON response", "error")
+                    return []
+
+    async def get_report_details(self, report_id):
+        # Call the Synapse admin API to get full details on a report
+        endpoint = f"/_synapse/admin/v1/event_reports/{report_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.matrix_client.homeserver}{endpoint}",
+                headers={"Authorization": f"Bearer {self.matrix_client.access_token}"},
+            ) as response:
+                try:
+                    response_json = await response.json()
+                    return response_json
+                except json.JSONDecodeError:
+                    self.logger.log("Failed to decode JSON response", "error")
+                    return {}
+
+    async def post_report_message(self, report_details):
+        # Extract relevant information from the report details
+        report_id = report_details.get("id")
+        event_id = report_details.get("event_id")
+        user_id = report_details.get("user_id")
+        room_id = report_details.get("room_id")
+        reason = report_details.get("reason")
+        content = report_details.get("event_json", {})
+        sender = content.get("sender")
+        event_type = content.get("type")
+        body = content.get("content", {}).get("body", "No message content")
+
+        # Format the message
+        message = (
+            f"🚨 New Event Report (ID: {report_id}) 🚨\n"
+            f"Event ID: {event_id}\n"
+            f"Reported by: {user_id}\n"
+            f"Room ID: {room_id}\n"
+            f"Reason: {reason}\n"
+            f"Sender: {sender}\n"
+            f"Event Type: {event_type}\n"
+            f"Message Content: {body}"
+        )
+
+        # Send the formatted message to the pre-configured room
+        await self.matrix_client.room_send(
+            room_id=self.room_id,
+            message_type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": message,
+                "format": "org.matrix.custom.html",
+                "formatted_body": f"<pre><code>{message}</code></pre>",
+            },
+        )
+
+    async def process_reports(self):
+        # Task to process reports
+        while True:
+            try:
+                self.logger.log("Starting to process reports", "debug")
+                report_state = await self.get_state_event(
+                    self.room_id, "reportbot.report_state"
+                )
+
+                try:
+                    known_report = int(report_state["content"]["report"])
+                except:
+                    known_report = 0
+
+                self.logger.log(f"Processing reports since: {known_report}", "debug")
+
+                try:
+                    reports = await self.get_new_reports(known_report)
+
+                    for report in reports:
+                        report_id = report["id"]
+
+                        self.logger.log(f"Processing report: {report_id}", "debug")
+
+                        known_report = max(known_report, report_id)
+                        report_details = await self.get_report_details(report_id)
+                        await self.post_report_message(report_details)
+
+                    await self.send_state_event(
+                        self.room_id, "reportbot.report_state", {"report": known_report}
+                    )
                 except Exception as e:
-                    self.logger.log(
-                        f"Something went wrong processing room {room.room_id}: {e}",
-                        "error",
+                    self.logger.log(f"Error processing reports: {e}")
+                    await self.send_message(
+                        self.room_id,
+                        f"Something went wrong processing reports: {e}.",
+                        True,
                     )
 
-            end_timestamp = datetime.now()
-
-            self.logger.log("Done processing rooms", "debug")
-
-            if (
-                time_taken := (end_timestamp - start_timestamp).seconds
-            ) < self.loop_duration:
-                await asyncio.sleep(self.loop_duration - time_taken)
+                self.logger.log("Done processing reports", "debug")
+                await asyncio.sleep(self.loop_duration)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.log(f"Error processing reports: {e}")
+                try:
+                    await self.send_message(
+                        self.room_id,
+                        f"Something went wrong processing reports: {e}.",
+                        True,
+                    )
+                except Exception as e:
+                    self.logger.log(f"Error sending error message: {e}")
 
     async def run(self):
         """Start the bot."""
@@ -629,18 +550,6 @@ class RSSBot:
         self.logger.log("Running initial sync...", "debug")
 
         sync = await self.matrix_client.sync(timeout=30000, full_state=True)
-        if isinstance(sync, SyncResponse):
-            await self.response_callback(sync)
-        else:
-            self.logger.log(f"Initial sync failed, aborting: {sync}", "critical")
-            exit(1)
-
-        # Set up callbacks
-
-        self.logger.log("Setting up callbacks...", "debug")
-
-        self.matrix_client.add_event_callback(self.event_callback, Event)
-        self.matrix_client.add_response_callback(self.response_callback, Response)
 
         # Set custom name
 
@@ -651,9 +560,9 @@ class RSSBot:
         # Start syncing events
         self.logger.log("Starting sync loop...", "warning")
         sync_task = self.matrix_client.sync_forever(timeout=30000, full_state=True)
-        feed_task = self.process_rooms()
+        reports_task = self.process_reports()
 
-        tasks = asyncio.gather(sync_task, feed_task)
+        tasks = asyncio.gather(sync_task, reports_task)
 
         try:
             await tasks

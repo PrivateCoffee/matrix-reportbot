@@ -5,3 +5,4 @@ __pycache__/
 dist/
 pantalaimon.conf
 build/
+venv/

@@ -6,20 +6,20 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [project]
-name = "matrix-rssbot"
-version = "0.1.1"
+name = "matrix-reportbot"
+version = "0.0.1"
 
 authors = [
   { name="Private.coffee Team", email="support@private.coffee" },
 ]
 
-description = "Simple RSS feed bridge for Matrix"
+description = "Simple content report subscription bot for Matrix."
 readme = "README.md"
 license = { file="LICENSE" }
 requires-python = ">=3.10"
 
 packages = [
-    "src/matrix_rssbot"
+    "src/matrix_reportbot"
 ]
 
 classifiers = [
@@ -33,15 +33,14 @@ dependencies = [
     "pantalaimon",
     "setuptools",
     "markdown2",
-    "feedparser",
     ]
 
 [project.urls]
-"Homepage" = "https://git.private.coffee/PrivateCoffee/matrix-rssbot"
-"Bug Tracker" = "https://git.private.coffee/PrivateCoffee/matrix-rssbot/issues"
+"Homepage" = "https://git.private.coffee/PrivateCoffee/matrix-reportbot"
+"Bug Tracker" = "https://git.private.coffee/PrivateCoffee/matrix-reportbot/issues"
 
 [project.scripts]
-rssbot = "matrix_rssbot.__main__:main"
+reportbot = "matrix_reportbot.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/matrix_rssbot"]
+packages = ["src/matrix_reportbot"]

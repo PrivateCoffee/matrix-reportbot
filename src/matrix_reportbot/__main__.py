@@ -1,4 +1,4 @@
-from .classes.bot import RSSBot
+from .classes.bot import ReportBot
 
 from argparse import ArgumentParser
 from configparser import ConfigParser
@@ -12,7 +12,7 @@ def sigterm_handler(_signo, _stack_frame):
 
 def get_version():
     try:
-        package_version = pkg_resources.get_distribution("matrix_rssbot").version
+        package_version = pkg_resources.get_distribution("matrix_reportbot").version
     except pkg_resources.DistributionNotFound:
         return None
     return package_version
@@ -40,7 +40,7 @@ def main():
     config.read(args.config)
 
     # Create bot
-    bot = RSSBot.from_config(config)
+    bot = ReportBot.from_config(config)
 
     # Listen for SIGTERM
     signal.signal(signal.SIGTERM, sigterm_handler)
