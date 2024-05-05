@@ -30,7 +30,6 @@ classifiers = [
 
 dependencies = [
     "matrix-nio",
-    "pantalaimon",
     "setuptools",
     "markdown2",
     ]
