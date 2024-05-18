@@ -18,7 +18,6 @@ from nio import (
 
 from typing import Optional, List
 from configparser import ConfigParser
-from io import BytesIO
 
 import uuid
 import json
@@ -57,7 +56,7 @@ class ReportBot:
         """
         try:
             return json.loads(self.config["ReportBot"]["AllowedUsers"])
-        except:
+        except Exception:
             return []
 
     @property
@@ -177,115 +176,6 @@ class ReportBot:
                 device_id = devices.devices[0].id
 
         return device_id
-
-    async def upload_file(
-        self,
-        file: bytes,
-        filename: str = "file",
-        mime: str = "application/octet-stream",
-    ) -> str:
-        """Upload a file to the homeserver.
-
-        Args:
-            file (bytes): The file to upload.
-            filename (str, optional): The name of the file. Defaults to "file".
-            mime (str, optional): The MIME type of the file. Defaults to "application/octet-stream".
-
-        Returns:
-            str: The MXC URI of the uploaded file.
-        """
-
-        bio = BytesIO(file)
-        bio.seek(0)
-
-        response, _ = await self.matrix_client.upload(
-            bio, content_type=mime, filename=filename, filesize=len(file)
-        )
-
-        return response.content_uri
-
-    async def send_image(
-        self, room: MatrixRoom, image: bytes, message: Optional[str] = None
-    ):
-        """Send an image to a room.
-
-        Args:
-            room (MatrixRoom|str): The room to send the image to.
-            image (bytes): The image to send.
-            message (str, optional): The message to send with the image. Defaults to None.
-        """
-
-        if isinstance(room, MatrixRoom):
-            room = room.room_id
-
-        self.logger.log(
-            f"Sending image of size {len(image)} bytes to room {room}", "debug"
-        )
-
-        bio = BytesIO(image)
-        img = Image.open(bio)
-        mime = Image.MIME[img.format]
-
-        (width, height) = img.size
-
-        self.logger.log(
-            f"Uploading - Image size: {width}x{height} pixels, MIME type: {mime}",
-            "debug",
-        )
-
-        content_uri = await self.upload_file(image, "image", mime)
-
-        self.logger.log("Uploaded image - sending message...", "debug")
-
-        content = {
-            "body": message or "",
-            "info": {
-                "mimetype": mime,
-                "size": len(image),
-                "w": width,
-                "h": height,
-            },
-            "msgtype": "m.image",
-            "url": content_uri,
-        }
-
-        status = await self.matrix_client.room_send(room, "m.room.message", content)
-
-        self.logger.log("Sent image", "debug")
-
-    async def send_file(
-        self, room: MatrixRoom, file: bytes, filename: str, mime: str, msgtype: str
-    ):
-        """Send a file to a room.
-
-        Args:
-            room (MatrixRoom|str): The room to send the file to.
-            file (bytes): The file to send.
-            filename (str): The name of the file.
-            mime (str): The MIME type of the file.
-        """
-
-        if isinstance(room, MatrixRoom):
-            room = room.room_id
-
-        self.logger.log(
-            f"Sending file of size {len(file)} bytes to room {room}", "debug"
-        )
-
-        content_uri = await self.upload_file(file, filename, mime)
-
-        self.logger.log("Uploaded file - sending message...", "debug")
-
-        content = {
-            "body": filename,
-            "info": {"mimetype": mime, "size": len(file)},
-            "msgtype": msgtype,
-            "url": content_uri,
-        }
-
-        status = await self.matrix_client.room_send(room, "m.room.message", content)
-
-        self.logger.log("Sent file", "debug")
 
     async def send_message(
         self,
@@ -456,7 +346,7 @@ class ReportBot:
 
                 try:
                     known_report = int(report_state["content"]["report"])
-                except:
+                except Exception:
                     known_report = 0
 
                 self.logger.log(f"Processing reports since: {known_report}", "debug")
