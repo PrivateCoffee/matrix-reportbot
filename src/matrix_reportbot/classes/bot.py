@@ -1,5 +1,4 @@
 import asyncio
-import functools
 import aiohttp
 
 from nio import (
@@ -7,48 +6,22 @@ from nio import (
     AsyncClientConfig,
     WhoamiResponse,
     DevicesResponse,
-    Event,
-    Response,
     MatrixRoom,
     Api,
-    RoomMessagesError,
-    GroupEncryptionError,
-    EncryptionError,
-    RoomMessageText,
     RoomSendResponse,
     SyncResponse,
-    RoomMessageNotice,
     JoinError,
     RoomLeaveError,
     RoomSendError,
-    RoomVisibility,
-    RoomCreateError,
-    RoomMessageMedia,
-    RoomMessageImage,
-    RoomMessageFile,
-    RoomMessageAudio,
-    DownloadError,
-    DownloadResponse,
-    ToDeviceEvent,
-    ToDeviceError,
-    RoomPutStateError,
     RoomGetStateError,
 )
 
 from typing import Optional, List
 from configparser import ConfigParser
-from datetime import datetime
 from io import BytesIO
-from pathlib import Path
-from contextlib import closing
 
-import base64
 import uuid
-import traceback
 import json
-import importlib.util
-import sys
-import traceback
 
 import markdown2
 
