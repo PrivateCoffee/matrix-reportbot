@@ -526,6 +526,40 @@ class ReportBot:
                 except Exception as e:
                     self.logger.log(f"Error sending error message: {e}")
 
+    async def accept_pending_invites(self):
+        """Accept all pending invites."""
+
+        assert self.matrix_client, "Matrix client not set up"
+
+        invites = self.matrix_client.invited_rooms
+
+        for invite in [k for k in invites.keys()]:
+            if invite in self.room_ignore_list:
+                self.logger.log(
+                    f"Ignoring invite to room {invite} (room is in ignore list)",
+                    "debug",
+                )
+                continue
+
+            self.logger.log(f"Accepting invite to room {invite}")
+
+            response = await self.matrix_client.join(invite)
+
+            if isinstance(response, JoinError):
+                self.logger.log(
+                    f"Error joining room {invite}: {response.message}. Not trying again.",
+                    "error",
+                )
+
+                leave_response = await self.matrix_client.room_leave(invite)
+
+                if isinstance(leave_response, RoomLeaveError):
+                    self.logger.log(
+                        f"Error leaving room {invite}: {leave_response.message}",
+                        "error",
+                    )
+                    self.room_ignore_list.append(invite)
+
     async def run(self):
         """Start the bot."""
 
@@ -545,11 +579,16 @@ class ReportBot:
         )
         self.matrix_client.config = client_config
 
-        # Run initial sync (includes joining rooms)
+        # Run initial sync
 
         self.logger.log("Running initial sync...", "debug")
 
-        sync = await self.matrix_client.sync(timeout=30000, full_state=True)
+        await self.matrix_client.sync(timeout=30000, full_state=True)
+
+        # Accept pending invites
+
+        self.logger.log("Joining rooms...", "debug")
+        self.accept_pending_invites()
 
         # Set custom name
 
