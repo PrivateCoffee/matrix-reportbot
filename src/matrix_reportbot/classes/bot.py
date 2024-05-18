@@ -588,7 +588,7 @@ class ReportBot:
         # Accept pending invites
 
         self.logger.log("Joining rooms...", "debug")
-        self.accept_pending_invites()
+        await self.accept_pending_invites()
 
         # Set custom name
 
